@@ -128,8 +128,8 @@ extremely critical but can expose some information that your service does not ne
 -   `ALLOW_START` (containers/`id`/`start`)
 -   `ALLOW_STOP` (containers/`id`/`stop`)
 -   `ALLOW_RESTARTS` (containers/`id`/`stop`|`restart`|`kill`)
--   `ALLOW_PAUSE` (containers/`id`/pause)
--   `ALLOW_UNPAUSE` (containers/`id`/unpause)
+-   `ALLOW_PAUSE` (containers/`id`/`pause`)
+-   `ALLOW_UNPAUSE` (containers/`id`/`unpause`)
 -   `DISTRIBUTION`
 -   `EXEC`
 -   `GRPC`

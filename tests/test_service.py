@@ -55,6 +55,27 @@ def test_container_permissions(proxy_factory):
         _check_permissions(allowed_calls, forbidden_calls)
 
 
+def test_container_inspect_env_stripping(proxy_factory):
+    # Create a container with a secret environment variable
+    secret_env = "MY_SECRET_KEY=supersecret123"
+    container_name = "test_env_stripping"
+    docker("run", "-d", "--name", container_name, "-e", secret_env, "alpine", "sleep", "100")
+
+    try:
+        with proxy_factory(CONTAINERS=1):
+            import json
+            # Get inspect output through the proxy
+            inspect_output = docker("inspect", container_name)
+            inspect_data = json.loads(inspect_output)
+
+            # Check that Env is empty
+            env = inspect_data[0]["Config"]["Env"]
+            assert len(env) == 0, f"Expected empty Env, but found: {env}"
+            assert secret_env not in str(inspect_output), "Secret environment variable found in inspect output!"
+    finally:
+        docker("rm", "-f", container_name)
+
+
 def test_post_permissions(proxy_factory):
     with proxy_factory(POST=1) as test_container:
         allowed_calls = []

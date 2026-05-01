@@ -9,8 +9,8 @@
 > inspect responses**. With `CONTAINERS=1` enabled, the upstream proxy exposes the full
 > output of `GET /containers/{id}/json`, which includes `Config.Env` — a common place
 > where secrets (DB passwords, API keys, tokens) end up. This fork rewrites those
-> responses on the fly so `Env` is always returned as an empty array `[]`, regardless
-> of what the container actually has set.
+> responses on the fly so `Env` is always returned as an empty array `[]`, regardless of
+> what the container actually has set.
 >
 > Everything else (labels, state, stats, network info, mounts, …) is forwarded
 > untouched, so consumers like [Homepage][gethomepage], Traefik, and similar tools

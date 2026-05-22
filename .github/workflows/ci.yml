@@ -62,6 +62,9 @@ jobs:
       - run: poetry run pytest --prebuild
   build-push:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     services:
       registry:
         image: registry:2
@@ -69,7 +72,6 @@ jobs:
           - 5000:5000
     env:
       DOCKER_IMAGE_NAME: ${{ github.repository }}
-      DOCKERHUB_IMAGE_NAME: tecnativa/docker-socket-proxy
       PUSH: ${{ toJSON(github.event_name != 'pull_request') }}
     steps:
       # Set up Docker Environment
@@ -119,19 +121,13 @@ jobs:
           labels: ${{ steps.docker_meta_local.outputs.labels }}
           tags: ${{ steps.docker_meta_local.outputs.tags }}
       # Next jobs only happen outside of pull requests and on main branches
-      - name: Login to DockerHub
-        if: ${{ fromJSON(env.PUSH) }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_LOGIN }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Login to GitHub Container Registry
         if: ${{ fromJSON(env.PUSH) }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.BOT_LOGIN }}
-          password: ${{ secrets.BOT_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Docker meta for public images
         if: ${{ fromJSON(env.PUSH) }}
         id: docker_meta_public
@@ -139,7 +135,6 @@ jobs:
         with:
           images: |
             ghcr.io/${{ env.DOCKER_IMAGE_NAME }}
-            ${{ env.DOCKERHUB_IMAGE_NAME }}
           tag-edge: true
           tag-semver: |
             {{version}}

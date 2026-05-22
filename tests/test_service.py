@@ -1,3 +1,4 @@
+import json
 import logging
 
 import pytest
@@ -53,6 +54,33 @@ def test_container_permissions(proxy_factory):
             ("restart", test_container),
         ]
         _check_permissions(allowed_calls, forbidden_calls)
+
+
+def test_container_inspect_env_stripped(proxy_factory):
+    secret_env = "MY_SECRET_KEY=supersecret123"
+    container_name = "test_env_stripping"
+    docker(
+        "run",
+        "-d",
+        "--name",
+        container_name,
+        "-e",
+        secret_env,
+        "alpine",
+        "sleep",
+        "100",
+    )
+    try:
+        with proxy_factory(CONTAINERS=1):
+            inspect_output = docker("inspect", container_name)
+            inspect_data = json.loads(inspect_output)
+            env = inspect_data[0]["Config"]["Env"]
+            assert env == [], f"Expected empty Env, got: {env}"
+            assert (
+                secret_env not in inspect_output
+            ), "Secret env value found in inspect output"
+    finally:
+        docker("rm", "-f", container_name)
 
 
 def test_post_permissions(proxy_factory):

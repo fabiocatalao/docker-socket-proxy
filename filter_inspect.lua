@@ -5,6 +5,43 @@
 -- rewrite the response body via http-response. Instead this opens its own
 -- connection to the docker socket, fetches the inspect JSON, scrubs Env,
 -- and returns the modified body via the Reply API.
+
+-- Replace every "Env":[...] in body with "Env":[].
+--
+-- We can't use body:gsub('"Env"%s*:%s*%b[]', '"Env":[]') because Lua's
+-- %b[] doesn't understand JSON string escaping: an env value containing
+-- an un-paired ] (e.g. FOO=]bar) would close the balance counter early
+-- and leave the rest of the array un-stripped (plus break the JSON).
+-- This scanner tracks JSON string state so brackets inside strings are
+-- ignored, and only matches the array's true closing ].
+local function strip_env(body)
+    local out, pos = {}, 1
+    while true do
+        local s, e = body:find('"Env"%s*:%s*%[', pos)
+        if not s then
+            out[#out + 1] = body:sub(pos)
+            break
+        end
+        out[#out + 1] = body:sub(pos, s - 1)
+        out[#out + 1] = '"Env":[]'
+        local depth, in_str, i = 1, false, e + 1
+        while i <= #body and depth > 0 do
+            local c = body:sub(i, i)
+            if in_str then
+                if c == "\\" then i = i + 1
+                elseif c == '"' then in_str = false end
+            elseif c == '"' then in_str = true
+            elseif c == "[" then depth = depth + 1
+            elseif c == "]" then depth = depth - 1
+            end
+            i = i + 1
+        end
+        if depth ~= 0 then return body end
+        pos = i
+    end
+    return table.concat(out)
+end
+
 core.register_action("inspect_handler", {"http-req"}, function(txn)
     local socket_path = os.getenv("SOCKET_PATH") or "/var/run/docker.sock"
     local sock = core.tcp()
@@ -41,7 +78,7 @@ core.register_action("inspect_handler", {"http-req"}, function(txn)
         body = table.concat(decoded)
     end
 
-    local new_body = body:gsub('"Env"%s*:%s*%b[]', '"Env":[]')
+    local new_body = strip_env(body)
     local status = tonumber(response:match("HTTP/1%.%d (%d+)")) or 200
 
     local reply = txn:reply{

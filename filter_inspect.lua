@@ -1,29 +1,42 @@
--- Strips Config.Env from Docker /containers/<id>/json responses so secrets
--- in container env vars don't leak through the proxy.
+-- Strips secret-bearing fields from Docker /containers/<id>/json responses so
+-- secrets passed via env vars (Config.Env) or the container command line
+-- (Config.Cmd / top-level Args) don't leak through the proxy.
+--
+-- Config.Labels is deliberately NOT stripped: Homepage's Docker label
+-- discovery reads homepage.* labels (including widget API keys) through this
+-- proxy, so blanking Labels would break the dashboard. Keep label-borne
+-- secrets off untrusted networks by scoping the proxy itself (e.g. bind it to
+-- a Tailscale interface) rather than by redacting Labels here.
 --
 -- HAProxy ≥2.5 forbids channel manipulation in HTTP mode, so we can't
 -- rewrite the response body via http-response. Instead this opens its own
--- connection to the docker socket, fetches the inspect JSON, scrubs Env,
--- and returns the modified body via the Reply API.
+-- connection to the docker socket, fetches the inspect JSON, scrubs the
+-- fields, and returns the modified body via the Reply API.
 
--- Replace every "Env":[...] in body with "Env":[].
+-- Replace every '"key":<open>...<close>' in body with '"key":<open><close>'
+-- (e.g. "Env":[...] -> "Env":[]).
 --
--- We can't use body:gsub('"Env"%s*:%s*%b[]', '"Env":[]') because Lua's
--- %b[] doesn't understand JSON string escaping: an env value containing
--- an un-paired ] (e.g. FOO=]bar) would close the balance counter early
--- and leave the rest of the array un-stripped (plus break the JSON).
--- This scanner tracks JSON string state so brackets inside strings are
--- ignored, and only matches the array's true closing ].
-local function strip_env(body)
+-- We can't use body:gsub('"key"%s*:%s*%b[]', ...) because Lua's %b[] doesn't
+-- understand JSON string escaping: a value containing an un-paired bracket
+-- (e.g. FOO=]bar) would close the balance counter early and leave the rest of
+-- the value un-stripped (plus break the JSON). This scanner tracks JSON string
+-- state so brackets inside strings are ignored, and only matches the value's
+-- true closing bracket. On malformed/truncated input it returns the body
+-- unchanged for that field, so we never emit broken JSON.
+local function strip_field(body, key, openc, closec)
+    -- '[' is a Lua-pattern magic char; '{' is not. Escape only what's needed.
+    local open_pat = openc:gsub("([%[%]%%])", "%%%1")
+    local find_pat = '"' .. key .. '"%s*:%s*' .. open_pat
+    local empty = openc .. closec
     local out, pos = {}, 1
     while true do
-        local s, e = body:find('"Env"%s*:%s*%[', pos)
+        local s, e = body:find(find_pat, pos)
         if not s then
             out[#out + 1] = body:sub(pos)
             break
         end
         out[#out + 1] = body:sub(pos, s - 1)
-        out[#out + 1] = '"Env":[]'
+        out[#out + 1] = '"' .. key .. '":' .. empty
         local depth, in_str, i = 1, false, e + 1
         while i <= #body and depth > 0 do
             local c = body:sub(i, i)
@@ -31,8 +44,8 @@ local function strip_env(body)
                 if c == "\\" then i = i + 1
                 elseif c == '"' then in_str = false end
             elseif c == '"' then in_str = true
-            elseif c == "[" then depth = depth + 1
-            elseif c == "]" then depth = depth - 1
+            elseif c == openc then depth = depth + 1
+            elseif c == closec then depth = depth - 1
             end
             i = i + 1
         end
@@ -40,6 +53,15 @@ local function strip_env(body)
         pos = i
     end
     return table.concat(out)
+end
+
+-- Scrub every field that can carry a secret. Each pass is independent, so a
+-- malformed value in one field can't prevent the others from being stripped.
+local function scrub(body)
+    body = strip_field(body, "Env", "[", "]")   -- Config.Env
+    body = strip_field(body, "Cmd", "[", "]")   -- Config.Cmd (secrets in the command line)
+    body = strip_field(body, "Args", "[", "]")  -- top-level Args (the same command line)
+    return body
 end
 
 core.register_action("inspect_handler", {"http-req"}, function(txn)
@@ -78,7 +100,7 @@ core.register_action("inspect_handler", {"http-req"}, function(txn)
         body = table.concat(decoded)
     end
 
-    local new_body = strip_env(body)
+    local new_body = scrub(body)
     local status = tonumber(response:match("HTTP/1%.%d (%d+)")) or 200
 
     local reply = txn:reply{

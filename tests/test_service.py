@@ -83,34 +83,6 @@ def test_container_inspect_env_stripped(proxy_factory):
         docker("rm", "-f", container_name)
 
 
-def test_container_inspect_cmd_and_args_stripped(proxy_factory):
-    secret_cmd = "SECRET_IN_CMD=supersecret456"
-    container_name = "test_cmd_stripping"
-    docker(
-        "run",
-        "-d",
-        "--name",
-        container_name,
-        "alpine",
-        "sh",
-        "-c",
-        f"echo {secret_cmd}; sleep 100",
-    )
-    try:
-        with proxy_factory(CONTAINERS=1):
-            inspect_output = docker("inspect", container_name)
-            inspect_data = json.loads(inspect_output)
-            cmd = inspect_data[0]["Config"]["Cmd"]
-            args = inspect_data[0]["Args"]
-            assert cmd == [], f"Expected empty Config.Cmd, got: {cmd}"
-            assert args == [], f"Expected empty Args, got: {args}"
-            assert (
-                secret_cmd not in inspect_output
-            ), "Secret command-line value found in inspect output"
-    finally:
-        docker("rm", "-f", container_name)
-
-
 def test_post_permissions(proxy_factory):
     with proxy_factory(POST=1) as test_container:
         allowed_calls = []

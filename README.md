@@ -146,6 +146,20 @@ extremely critical but can expose some information that your service does not ne
 - `TASKS`
 - `VOLUMES`
 
+## Hide container environment variables
+
+Granting `CONTAINERS` lets clients inspect containers, and the inspect response includes
+every environment variable passed to them, which often means passwords and API tokens.
+
+Set `HIDE_CONTAINER_ENV=1` to strip `Config.Env` from container inspect responses
+(`GET /containers/{id}/json`). It is disabled by default, because some tools rely on it:
+for example, anything that recreates containers from their inspect output would recreate
+them without their environment.
+
+This only covers container inspect. Environment variables are still visible through
+other API sections, such as `SERVICES` and `TASKS` (Swarm service specs) and `IMAGES`
+(variables baked into images), and through `EXEC` if you grant it.
+
 ## Use a different Docker socket location
 
 If your OS stores its Docker socket in a different location and you are unable to bind
